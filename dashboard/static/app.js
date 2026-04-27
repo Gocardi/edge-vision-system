@@ -6,6 +6,8 @@ const highTotalEl = document.getElementById("high-total");
 const cameraIdEl = document.getElementById("camera-id");
 const lastEventEl = document.getElementById("last-event");
 const feedEl = document.getElementById("event-feed");
+const cameraFrameEl = document.getElementById("camera-frame");
+const frameTimeEl = document.getElementById("frame-time");
 
 const MAX_FEED_ITEMS = 80;
 
@@ -53,12 +55,26 @@ function prependEvent(event) {
   }
 }
 
+function updateFrame(framePayload) {
+  if (!framePayload || !framePayload.image_b64) {
+    return;
+  }
+  cameraFrameEl.src = `data:image/jpeg;base64,${framePayload.image_b64}`;
+  frameTimeEl.textContent = `Frame ${framePayload.frame ?? "-"} | ${formatDate(
+    framePayload.timestamp
+  )}`;
+}
+
 async function loadSnapshot() {
   const response = await fetch("/api/snapshot", { cache: "no-store" });
   const data = await response.json();
 
   updateStats(data.stats || {});
   feedEl.innerHTML = "";
+
+  if (data.latest_frame) {
+    updateFrame(data.latest_frame);
+  }
 
   (data.events || []).forEach((event) => {
     feedEl.appendChild(createFeedItem(event));
@@ -78,6 +94,12 @@ function connectStream() {
 
   stream.onmessage = (event) => {
     const payload = JSON.parse(event.data);
+
+    if (payload.kind === "frame") {
+      updateFrame(payload);
+      return;
+    }
+
     prependEvent(payload);
 
     const current = {

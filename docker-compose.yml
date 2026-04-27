@@ -52,6 +52,9 @@ services:
       MQTT_BROKER: mqtt
       MQTT_PORT: "1883"
       MQTT_TOPIC: camera/events
+      FRAME_TOPIC: camera/frames
+      FRAME_INTERVAL_SEC: "0.6"
+      FRAME_JPEG_QUALITY: "65"
       CAMERA_ID: cam-01
       CAMERA_INDEX: "2"
       INTERVAL_SEC: "3"
@@ -92,6 +95,7 @@ services:
       EVENTS_TOPIC: camera/events
       ALERTS_TOPIC: edge/alerts
       ACTIONS_TOPIC: edge/actions
+      FRAMES_TOPIC: camera/frames
       FLASK_HOST: 0.0.0.0
       FLASK_PORT: "8080"
     depends_on:

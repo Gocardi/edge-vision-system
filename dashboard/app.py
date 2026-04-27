@@ -16,6 +16,7 @@ MQTT_PORT = int(os.getenv("MQTT_PORT", "1883"))
 EVENTS_TOPIC = os.getenv("EVENTS_TOPIC", "camera/events")
 ALERTS_TOPIC = os.getenv("ALERTS_TOPIC", "edge/alerts")
 ACTIONS_TOPIC = os.getenv("ACTIONS_TOPIC", "edge/actions")
+FRAMES_TOPIC = os.getenv("FRAMES_TOPIC", "camera/frames")
 
 MAX_EVENTS = 150
 metrics_lock = threading.Lock()
@@ -32,6 +33,8 @@ stats = {
 
 subscribers_lock = threading.Lock()
 subscribers = []
+latest_frame_lock = threading.Lock()
+latest_frame = None
 
 
 def parse_iso_timestamp(ts):
@@ -99,12 +102,27 @@ def on_connect(client, userdata, flags, rc):
     client.subscribe(EVENTS_TOPIC, qos=1)
     client.subscribe(ALERTS_TOPIC, qos=1)
     client.subscribe(ACTIONS_TOPIC, qos=1)
+    client.subscribe(FRAMES_TOPIC, qos=0)
 
 
 def on_message(client, userdata, message):
     try:
         payload = json.loads(message.payload.decode("utf-8"))
     except json.JSONDecodeError:
+        return
+
+    if message.topic == FRAMES_TOPIC:
+        frame_payload = {
+            "kind": "frame",
+            "camera_id": payload.get("camera_id", "-"),
+            "timestamp": payload.get("timestamp", datetime.now(timezone.utc).isoformat()),
+            "frame": payload.get("frame", "-"),
+            "image_b64": payload.get("image_b64", ""),
+        }
+        with latest_frame_lock:
+            global latest_frame
+            latest_frame = frame_payload
+        publish_to_subscribers(frame_payload)
         return
 
     event = serialize_event(message.topic, payload)
@@ -137,6 +155,8 @@ def api_snapshot():
             "stats": dict(stats),
             "events": list(recent_events),
         }
+    with latest_frame_lock:
+        payload["latest_frame"] = dict(latest_frame) if latest_frame else None
     return jsonify(payload)
 
 

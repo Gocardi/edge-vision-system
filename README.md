@@ -70,6 +70,7 @@ http://localhost:8080
 - Total de alertas recibidas.
 - Conteo de severidad high y critical.
 - Cámara activa y timestamp del último evento.
+- Vista de cámara en vivo (frames JPEG enviados por MQTT).
 - Feed en vivo con event_type, severidad, confianza y tópico MQTT.
 
 ### Topics monitoreados por la GUI
@@ -77,6 +78,13 @@ http://localhost:8080
 - camera/events
 - edge/alerts
 - edge/actions
+- camera/frames
+
+### Nota sobre video en vivo
+
+La vista de cámara depende del topic `camera/frames`, publicado por el servicio
+`detector`. Si no hay señal en la GUI, verificar que la cámara del host esté
+disponible para el contenedor detector.
 
 ## Ekuiper rules
 

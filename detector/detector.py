@@ -2,6 +2,7 @@ import json
 import time
 import os
 import logging
+import base64
 from datetime import datetime
 
 import cv2
@@ -28,6 +29,9 @@ INTERVAL_SEC  = float(os.getenv("INTERVAL_SEC", "3"))
 USE_SIMULATION = os.getenv("USE_SIMULATION", "false").lower() == "true"
 MODEL_PATH     = os.getenv("MODEL_PATH", "/app/models/yolov8n.pt")
 CONFIDENCE_THR = float(os.getenv("CONFIDENCE_THR", "0.45"))
+FRAME_TOPIC     = os.getenv("FRAME_TOPIC", "camera/frames")
+FRAME_INTERVAL_SEC = float(os.getenv("FRAME_INTERVAL_SEC", "0.6"))
+FRAME_JPEG_QUALITY = int(os.getenv("FRAME_JPEG_QUALITY", "65"))
 
 class EPPDetector:
     """
@@ -300,6 +304,25 @@ def build_event(person_id: int, ppe: dict, frame_num: int) -> dict:
         }
     }
 
+def publish_frame(client: mqtt.Client, frame: np.ndarray, frame_num: int):
+    """Publica un frame JPEG reducido en base64 para visualizar en la GUI."""
+    resized = cv2.resize(frame, (640, 360))
+    ok, encoded = cv2.imencode(
+        ".jpg",
+        resized,
+        [int(cv2.IMWRITE_JPEG_QUALITY), FRAME_JPEG_QUALITY]
+    )
+    if not ok:
+        return
+
+    payload = {
+        "camera_id": CAMERA_ID,
+        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "frame": frame_num,
+        "image_b64": base64.b64encode(encoded.tobytes()).decode("ascii"),
+    }
+    client.publish(FRAME_TOPIC, json.dumps(payload), qos=0)
+
 def run_yolo_detector(client: mqtt.Client):
     detector = EPPDetector(MODEL_PATH, CONFIDENCE_THR)
 
@@ -320,6 +343,7 @@ def run_yolo_detector(client: mqtt.Client):
 
     frame_num      = 0
     last_publish   = 0.0
+    last_frame_publish = 0.0
 
     try:
         while True:
@@ -331,6 +355,10 @@ def run_yolo_detector(client: mqtt.Client):
 
             frame_num += 1
             now = time.time()
+
+            if (now - last_frame_publish) >= FRAME_INTERVAL_SEC:
+                publish_frame(client, frame, frame_num)
+                last_frame_publish = now
 
             # Publicar solo cada INTERVAL_SEC segundos
             if (now - last_publish) < INTERVAL_SEC:
