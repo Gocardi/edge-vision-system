@@ -45,6 +45,39 @@ Para limpiar recursos no utilizados (contenedores, imágenes, volumenes):
 docker system prune
 ```
 
+## GUI de Monitoreo
+
+El proyecto ahora incluye una interfaz web en tiempo real para visualizar eventos,
+alertas y acciones publicadas por MQTT.
+
+### Acceso
+
+1. Levantar servicios:
+
+```bash
+docker-compose up --build
+```
+
+2. Abrir en navegador:
+
+```text
+http://localhost:8080
+```
+
+### Qué muestra la GUI
+
+- Total de eventos procesados.
+- Total de alertas recibidas.
+- Conteo de severidad high y critical.
+- Cámara activa y timestamp del último evento.
+- Feed en vivo con event_type, severidad, confianza y tópico MQTT.
+
+### Topics monitoreados por la GUI
+
+- camera/events
+- edge/alerts
+- edge/actions
+
 ## Ekuiper rules
 
 Primero limpiar
