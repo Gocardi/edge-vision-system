@@ -436,8 +436,13 @@ def run_yolo_detector(client: mqtt.Client):
     cap.set(cv2.CAP_PROP_FRAME_WIDTH,  640)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
     cap.set(cv2.CAP_PROP_FPS, 30)
+    
+    # Propiedades críticas para reducir lag
+    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)        # No acumular frames en buffer
+    cap.set(cv2.CAP_PROP_AUTOFOCUS, 0)         # Desactivar autofoco (ahorra CPU)
+    cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.25)  # Exposición manual fija
 
-    log.info(f"[CAM] Cámara lista: 640x480 @ 30fps")
+    log.info(f"[CAM] Cámara lista: 640x480 @ 30fps | Buffer=1 | Sin autofoco")
     log.info(f"[SYS] Publicando en '{MQTT_TOPIC}' cada {INTERVAL_SEC}s")
 
     frame_num      = 0
