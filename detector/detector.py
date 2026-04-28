@@ -304,6 +304,105 @@ def build_event(person_id: int, ppe: dict, frame_num: int) -> dict:
         }
     }
 
+def get_detection_style(event_type: str) -> tuple:
+    """Retorna color y texto corto para el overlay del frame."""
+    styles = {
+        "critical": ((0, 0, 255), "CRITICO"),
+        "high": ((0, 165, 255), "ALTO"),
+        "none": ((0, 200, 0), "OK"),
+    }
+    return styles.get(event_type, ((255, 255, 255), "INFO"))
+
+
+def annotate_frame(frame: np.ndarray, detections: list[dict], frame_num: int) -> np.ndarray:
+    """Dibuja cajas, etiquetas y estado EPP sobre el frame original."""
+    annotated = frame.copy()
+    overlay_height = 42
+
+    cv2.rectangle(annotated, (0, 0), (min(420, annotated.shape[1] - 1), overlay_height), (0, 0, 0), -1)
+    cv2.putText(
+        annotated,
+        f"CAMERA {CAMERA_ID} | FRAME {frame_num} | DETECTIONS {len(detections)}",
+        (12, 27),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.62,
+        (255, 255, 255),
+        2,
+        cv2.LINE_AA,
+    )
+
+    if not detections:
+        cv2.putText(
+            annotated,
+            "SIN PERSONAS",
+            (12, 60),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.78,
+            (255, 255, 255),
+            2,
+            cv2.LINE_AA,
+        )
+        return annotated
+
+    for detection in detections:
+        bbox = detection.get("bbox", {})
+        x1 = int(bbox.get("x1", 0))
+        y1 = int(bbox.get("y1", 0))
+        x2 = int(bbox.get("x2", 0))
+        y2 = int(bbox.get("y2", 0))
+        label = detection.get("label", "INFO")
+        color = tuple(detection.get("color", (255, 255, 255)))
+        helmet_ok = detection.get("helmet_ok", False)
+        vest_ok = detection.get("vest_ok", False)
+
+        x1 = max(0, x1)
+        y1 = max(0, y1)
+        x2 = min(annotated.shape[1] - 1, x2)
+        y2 = min(annotated.shape[0] - 1, y2)
+
+        cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 3)
+
+        status_parts = []
+        status_parts.append("CASCO" if helmet_ok else "SIN CASCO")
+        status_parts.append("CHALECO" if vest_ok else "SIN CHALECO")
+        status_text = " | ".join(status_parts)
+
+        label_text = f"P{detection.get('person_id', 0)} {label}"
+        text_size, _ = cv2.getTextSize(label_text, cv2.FONT_HERSHEY_SIMPLEX, 0.58, 2)
+        box_width = max(text_size[0], cv2.getTextSize(status_text, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)[0][0]) + 12
+        box_height = 46
+        box_y1 = max(0, y1 - box_height - 8)
+        box_y2 = max(0, y1 - 8)
+        if box_y1 == box_y2:
+            box_y1 = min(annotated.shape[0] - 1, y2 + 8)
+            box_y2 = min(annotated.shape[0] - 1, y2 + 8 + box_height)
+
+        box_x2 = min(annotated.shape[1] - 1, x1 + box_width)
+        cv2.rectangle(annotated, (x1, box_y1), (box_x2, box_y2), color, -1)
+        cv2.putText(
+            annotated,
+            label_text,
+            (x1 + 6, box_y1 + 18),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.58,
+            (0, 0, 0),
+            2,
+            cv2.LINE_AA,
+        )
+        cv2.putText(
+            annotated,
+            status_text,
+            (x1 + 6, box_y1 + 36),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.48,
+            (0, 0, 0),
+            1,
+            cv2.LINE_AA,
+        )
+
+    return annotated
+
+
 def publish_frame(client: mqtt.Client, frame: np.ndarray, frame_num: int):
     """Publica un frame JPEG reducido en base64 para visualizar en la GUI."""
     resized = cv2.resize(frame, (640, 360))
@@ -367,6 +466,7 @@ def run_yolo_detector(client: mqtt.Client):
             last_publish = now
 
             persons = detector.detect_persons(frame)
+            detections_for_overlay = []
 
             if not persons:
                 # Sin personas en el frame: publicar evento "clear"
@@ -380,6 +480,8 @@ def run_yolo_detector(client: mqtt.Client):
                     "metadata":   {"frame": frame_num, "persons_detected": 0}
                 }
                 client.publish(MQTT_TOPIC, json.dumps(event), qos=1)
+                annotated_frame = annotate_frame(frame, [], frame_num)
+                publish_frame(client, annotated_frame, frame_num)
                 log.info(f"[FRAME {frame_num}] Sin personas detectadas")
                 continue
 
@@ -389,15 +491,43 @@ def run_yolo_detector(client: mqtt.Client):
             for person_id, bbox in enumerate(persons):
                 ppe   = detector.analyze_ppe(frame, bbox)
                 event = build_event(person_id, ppe, frame_num)
+                helmet_ok = ppe["helmet"]["detected"]
+                vest_ok = ppe["vest"]["detected"]
+
+                if not helmet_ok and not vest_ok:
+                    event_type = "critical"
+                    label = "SIN CASCO / SIN CHALECO"
+                elif not helmet_ok:
+                    event_type = "high"
+                    label = "SIN CASCO"
+                elif not vest_ok:
+                    event_type = "high"
+                    label = "SIN CHALECO"
+                else:
+                    event_type = "none"
+                    label = "EPP OK"
+
+                color, short_status = get_detection_style(event_type)
+                detections_for_overlay.append({
+                    "person_id": person_id,
+                    "bbox": ppe.get("bbox", {}),
+                    "label": label,
+                    "color": color,
+                    "helmet_ok": helmet_ok,
+                    "vest_ok": vest_ok,
+                })
 
                 client.publish(MQTT_TOPIC, json.dumps(event), qos=1)
 
-                helmet_status = "[CHECK] CASCO" if ppe["helmet"]["detected"] else "❌ SIN CASCO"
-                vest_status   = "[CHECK] CHALECO" if ppe["vest"]["detected"] else "❌ SIN CHALECO"
+                helmet_status = "[CHECK] CASCO" if helmet_ok else "❌ SIN CASCO"
+                vest_status   = "[CHECK] CHALECO" if vest_ok else "❌ SIN CHALECO"
                 log.info(
                     f"  Persona {person_id}: {helmet_status} | {vest_status} "
                     f"| evento={event['event_type']} | severidad={event['severity']}"
                 )
+
+            annotated_frame = annotate_frame(frame, detections_for_overlay, frame_num)
+            publish_frame(client, annotated_frame, frame_num)
 
     except KeyboardInterrupt:
         log.info("[SYS] Detector detenido por el usuario")
