@@ -1,5 +1,3 @@
-version: "3.8"
-
 # All the services se comunican por nombre ("mqtt", "ekuiper")
 networks:
   edge-net:
@@ -53,11 +51,11 @@ services:
       MQTT_PORT: "1883"
       MQTT_TOPIC: camera/events
       FRAME_TOPIC: camera/frames
-      FRAME_INTERVAL_SEC: "0.6"
-      FRAME_JPEG_QUALITY: "65"
+      FRAME_INTERVAL_SEC: "0.1"
+      FRAME_JPEG_QUALITY: "85"
       CAMERA_ID: cam-01
-      CAMERA_INDEX: "2"
-      INTERVAL_SEC: "3"
+      CAMERA_INDEX: "0"
+      INTERVAL_SEC: "1.5"
       USE_SIMULATION: "false"
       MODEL_PATH: "/app/models/yolov8n.pt"
       CONFIDENCE_THR: "0.45"
@@ -67,7 +65,7 @@ services:
       - edge-net
     # To access to host webcam
     devices:
-      - /dev/video2:/dev/video2
+      - /dev/video0:/dev/video0
 
   # Action service
   action_service:

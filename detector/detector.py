@@ -435,9 +435,9 @@ def run_yolo_detector(client: mqtt.Client):
     # Configurar resolución (reducir carga de CPU)
     cap.set(cv2.CAP_PROP_FRAME_WIDTH,  640)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-    cap.set(cv2.CAP_PROP_FPS, 15)
+    cap.set(cv2.CAP_PROP_FPS, 30)
 
-    log.info(f"[CAM] Cámara lista: 640x480 @ 15fps")
+    log.info(f"[CAM] Cámara lista: 640x480 @ 30fps")
     log.info(f"[SYS] Publicando en '{MQTT_TOPIC}' cada {INTERVAL_SEC}s")
 
     frame_num      = 0
