@@ -27,7 +27,8 @@ body {
 }
 
 .layout {
-  width: min(1150px, 92vw);
+  /* Aumenta el ancho máximo para dar prioridad al video */
+  width: min(1300px, 96vw);
   margin: 0 auto;
   padding: 28px 0 40px;
 }
@@ -134,12 +135,13 @@ h1 {
 
 .panels {
   display: grid;
-  grid-template-columns: 1fr 2fr;
+  /* Dar más espacio a la columna izquierda (video) */
+  grid-template-columns: 1.8fr 1fr;
   gap: 12px;
 }
 
 .panel.wide {
-  min-height: 420px;
+  min-height: 520px;
 }
 
 .kv-list {
@@ -167,6 +169,8 @@ h1 {
   border-radius: 12px;
   overflow: hidden;
   background: rgba(0, 0, 0, 0.24);
+  /* Dar más altura mínima al contenedor del video */
+  min-height: 420px;
 }
 
 #camera-frame {
@@ -175,6 +179,8 @@ h1 {
   display: block;
   object-fit: cover;
   background: linear-gradient(120deg, #132734, #0a141c);
+  /* Permitir que el video sea más grande en pantallas anchas */
+  max-height: 720px;
 }
 
 #frame-time {

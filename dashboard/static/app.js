@@ -11,6 +11,21 @@ const frameTimeEl = document.getElementById("frame-time");
 
 const MAX_FEED_ITEMS = 80;
 
+// Traducciones para mostrar en la UI (español)
+const EVENT_TYPE_MAP = {
+  no_helmet: "Sin casco",
+  no_vest: "Sin chaleco",
+  no_helmet_no_vest: "Sin casco y sin chaleco",
+  ppe_compliant: "EPP OK",
+  clear: "Sin personas"
+};
+
+const SEVERITY_MAP = {
+  critical: "Crítico",
+  high: "Alto",
+  none: "OK"
+};
+
 function formatDate(isoValue) {
   if (!isoValue) return "-";
   const date = new Date(isoValue);
@@ -32,14 +47,16 @@ function createFeedItem(event) {
   item.className = "feed-item";
 
   const severity = (event.severity || "none").toLowerCase();
+  const typeLabel = EVENT_TYPE_MAP[event.event_type] || event.event_type || "desconocido";
+  const badgeText = SEVERITY_MAP[severity] || severity;
 
   item.innerHTML = `
     <div class="feed-top">
-      <strong>${event.event_type || "unknown"}</strong>
-      <span class="badge ${severity}">${severity}</span>
+      <strong>${typeLabel}</strong>
+      <span class="badge ${severity}">${badgeText}</span>
     </div>
     <div class="topic">${event.topic || "-"}</div>
-    <div class="meta">Camara: ${event.camera_id || "-"} | Frame: ${event.frame ?? "-"} | Confianza: ${event.confidence ?? 0}</div>
+    <div class="meta">Cámara: ${event.camera_id || "-"} | Fotograma: ${event.frame ?? "-"} | Confianza: ${event.confidence ?? 0}</div>
     <div class="meta">${formatDate(event.timestamp)}</div>
   `;
 
@@ -60,7 +77,7 @@ function updateFrame(framePayload) {
     return;
   }
   cameraFrameEl.src = `data:image/jpeg;base64,${framePayload.image_b64}`;
-  frameTimeEl.textContent = `Frame ${framePayload.frame ?? "-"} | ${formatDate(
+  frameTimeEl.textContent = `Fotograma ${framePayload.frame ?? "-"} | ${formatDate(
     framePayload.timestamp
   )}`;
 }

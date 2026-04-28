@@ -9,6 +9,7 @@ import cv2
 import numpy as np
 import paho.mqtt.client as mqtt
 from ultralytics import YOLO
+from collections import deque
 
 logging.basicConfig(
     level=logging.INFO,
@@ -32,6 +33,88 @@ CONFIDENCE_THR = float(os.getenv("CONFIDENCE_THR", "0.45"))
 FRAME_TOPIC     = os.getenv("FRAME_TOPIC", "camera/frames")
 FRAME_INTERVAL_SEC = float(os.getenv("FRAME_INTERVAL_SEC", "0.6"))
 FRAME_JPEG_QUALITY = int(os.getenv("FRAME_JPEG_QUALITY", "65"))
+
+# Trail visualization: guarda el centro del objetivo principal para dibujar su trayectoria
+TRAIL_MAX = 40
+
+# Simple multi-person tracker (ID -> state)
+TRACKERS = {}  # id -> {bbox, bbox_center, trail: deque, missed}
+NEXT_TRACKER_ID = 1
+MAX_MISSED = int(os.getenv("TRACKER_MAX_MISSED", "5"))
+DISTANCE_THRESHOLD = int(os.getenv("TRACKER_DIST_THR", "100"))
+
+def _center_of_bbox_dict(bbox: dict):
+    x1 = int(bbox.get("x1", 0))
+    y1 = int(bbox.get("y1", 0))
+    x2 = int(bbox.get("x2", 0))
+    y2 = int(bbox.get("y2", 0))
+    return ((x1 + x2) // 2, (y1 + y2) // 2)
+
+def update_trackers(detected_bboxes: list):
+    """Actualiza el diccionario TRACKERS a partir de una lista de bbox dicts.
+    Se empareja por distancia euclidiana entre centros; se crean nuevos IDs
+    y se eliminan trackers que no se ven tras `MAX_MISSED` frames.
+    """
+    global TRACKERS, NEXT_TRACKER_ID
+
+    centers = [_center_of_bbox_dict(b) for b in detected_bboxes]
+    used_det = set()
+
+    # Marcar todos como no emparejados
+    for t in TRACKERS.values():
+        t["matched"] = False
+
+    # Emparejar detecciones existentes por distancia mínima
+    for i, det in enumerate(detected_bboxes):
+        cx, cy = centers[i]
+        best_tid = None
+        best_dist = None
+        for tid, t in TRACKERS.items():
+            tx, ty = t.get("bbox_center", (0, 0))
+            dist = (tx - cx) ** 2 + (ty - cy) ** 2
+            if best_dist is None or dist < best_dist:
+                best_dist = dist
+                best_tid = tid
+
+        if best_tid is not None and best_dist <= DISTANCE_THRESHOLD * DISTANCE_THRESHOLD:
+            # asignar a tracker existente
+            t = TRACKERS[best_tid]
+            t["bbox"] = (int(det.get("x1", 0)), int(det.get("y1", 0)), int(det.get("x2", 0)), int(det.get("y2", 0)))
+            t["bbox_center"] = (cx, cy)
+            t["trail"].append((cx, cy))
+            if len(t["trail"]) > TRAIL_MAX:
+                t["trail"].popleft()
+            t["missed"] = 0
+            t["matched"] = True
+            used_det.add(i)
+        else:
+            # crear nuevo tracker
+            tid = NEXT_TRACKER_ID
+            NEXT_TRACKER_ID += 1
+            TRACKERS[tid] = {
+                "bbox": (int(det.get("x1", 0)), int(det.get("y1", 0)), int(det.get("x2", 0)), int(det.get("y2", 0))),
+                "bbox_center": (cx, cy),
+                "trail": deque([(cx, cy)]),
+                "missed": 0,
+                "matched": True,
+            }
+            used_det.add(i)
+
+    # Incrementar missed para trackers no emparejados
+    to_delete = []
+    for tid, t in list(TRACKERS.items()):
+        if not t.get("matched", False):
+            t["missed"] += 1
+        # limpiar flag temporal
+        t.pop("matched", None)
+        if t["missed"] > MAX_MISSED:
+            to_delete.append(tid)
+
+    for tid in to_delete:
+        TRACKERS.pop(tid, None)
+
+# Último frame anotado disponible para publicación periódica
+LAST_ANNOTATED_FRAME = None
 
 class EPPDetector:
     """
@@ -399,6 +482,44 @@ def annotate_frame(frame: np.ndarray, detections: list[dict], frame_num: int) ->
             1,
             cv2.LINE_AA,
         )
+        # Marcar el centro de la persona
+        cx = (x1 + x2) // 2
+        cy = (y1 + y2) // 2
+        cv2.circle(annotated, (cx, cy), 4, (0, 255, 255), -1)
+
+    # Dibujar trazas persistentes de cada tracker
+    try:
+        if TRACKERS:
+            for tid, t in TRACKERS.items():
+                trail = list(t.get("trail", []))
+                if len(trail) >= 2:
+                    pts = np.array(trail, dtype=np.int32).reshape(-1, 1, 2)
+                    trail_color = (255, 200, 0)  # color BGR
+                    cv2.polylines(annotated, [pts], False, trail_color, 2, cv2.LINE_AA)
+
+                    for i, (tx, ty) in enumerate(trail):
+                        radius = 1 if i < len(trail) - 1 else 4
+                        cv2.circle(annotated, (tx, ty), radius, trail_color, -1)
+
+                    # flecha del último segmento
+                    p1 = trail[-2]
+                    p2 = trail[-1]
+                    cv2.arrowedLine(annotated, p1, p2, trail_color, 2, tipLength=0.3)
+
+                    # etiqueta con ID del tracker
+                    lx, ly = trail[-1]
+                    label = f"P{tid}"
+                    cv2.putText(annotated, label, (lx + 8, ly - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.6, trail_color, 2, cv2.LINE_AA)
+
+                # dibujar bbox del tracker (ligero)
+                bx1, by1, bx2, by2 = t.get("bbox", (0, 0, 0, 0))
+                bx1 = max(0, int(bx1))
+                by1 = max(0, int(by1))
+                bx2 = min(annotated.shape[1] - 1, int(bx2))
+                by2 = min(annotated.shape[0] - 1, int(by2))
+                cv2.rectangle(annotated, (bx1, by1), (bx2, by2), (200, 200, 0), 2)
+    except Exception:
+        pass
 
     return annotated
 
@@ -423,6 +544,7 @@ def publish_frame(client: mqtt.Client, frame: np.ndarray, frame_num: int):
     client.publish(FRAME_TOPIC, json.dumps(payload), qos=0)
 
 def run_yolo_detector(client: mqtt.Client):
+    global LAST_ANNOTATED_FRAME
     detector = EPPDetector(MODEL_PATH, CONFIDENCE_THR)
 
     log.info(f"[CAM] Abriendo dispositivo {CAMERA_INDEX}...")
@@ -461,7 +583,9 @@ def run_yolo_detector(client: mqtt.Client):
             now = time.time()
 
             if (now - last_frame_publish) >= FRAME_INTERVAL_SEC:
-                publish_frame(client, frame, frame_num)
+                # Publicar el último frame anotado si existe, si no el frame crudo
+                to_publish = LAST_ANNOTATED_FRAME if LAST_ANNOTATED_FRAME is not None else frame
+                publish_frame(client, to_publish, frame_num)
                 last_frame_publish = now
 
             # Publicar solo cada INTERVAL_SEC segundos
@@ -489,7 +613,6 @@ def run_yolo_detector(client: mqtt.Client):
                 publish_frame(client, annotated_frame, frame_num)
                 log.info(f"[FRAME {frame_num}] Sin personas detectadas")
                 continue
-
             log.info(f"[FRAME {frame_num}] {len(persons)} persona(s) detectada(s)")
 
             # Analizar EPP de cada persona
@@ -531,7 +654,20 @@ def run_yolo_detector(client: mqtt.Client):
                     f"| evento={event['event_type']} | severidad={event['severity']}"
                 )
 
+            # Actualizar trackers con las bbox detectadas (persistencia entre frames)
+            tracker_bboxes = [d.get("bbox", {}) for d in detections_for_overlay if d.get("bbox")]
+            try:
+                update_trackers(tracker_bboxes)
+            except Exception:
+                pass
+
             annotated_frame = annotate_frame(frame, detections_for_overlay, frame_num)
+            # Guardar copia del frame anotado para publicaciones periódicas
+            try:
+                LAST_ANNOTATED_FRAME = annotated_frame.copy()
+            except Exception:
+                LAST_ANNOTATED_FRAME = annotated_frame
+
             publish_frame(client, annotated_frame, frame_num)
 
     except KeyboardInterrupt:
